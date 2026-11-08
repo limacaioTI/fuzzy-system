@@ -32,6 +32,18 @@ def _tres_triangulos(var, a, b, c, nomes=TERMOS):
 # ---------------------------------------------------------------------------
 # 1. Sistema de AVALIAÇÃO (nota de atuação)
 # ---------------------------------------------------------------------------
+def regras_avaliacao():
+    """Base de regras: cada termo dá "pontos"; a soma escolhe o termo da nota.
+    Finalizações pesam mais (é atacante); perdas de bola contam negativamente."""
+    pts_alvo = {"baixo": 0, "medio": 2, "alto": 4}
+    pts_passe = {"baixo": 0, "medio": 1, "alto": 2}
+    pts_perdas = {"baixo": 2, "medio": 1, "alto": 0}
+    saida_por_pontos = {0: "ruim", 1: "ruim", 2: "fraca", 3: "regular",
+                        4: "regular", 5: "boa", 6: "boa", 7: "otima", 8: "otima"}
+    return [(ta, tp, tl, saida_por_pontos[pts_alvo[ta] + pts_passe[tp] + pts_perdas[tl]])
+            for ta in TERMOS for tp in TERMOS for tl in TERMOS]
+
+
 def _criar_avaliacao():
     alvo = ctrl.Antecedent(np.linspace(0, 8, 161), "finalizacoes_alvo")
     passe = ctrl.Antecedent(np.linspace(0, 100, 201), "precisao_passe")
@@ -48,21 +60,8 @@ def _criar_avaliacao():
     nota["boa"] = fuzz.trimf(nota.universe, [0.45, 0.65, 0.85])
     nota["otima"] = fuzz.trimf(nota.universe, [0.6, 1, 1])
 
-    # Base de regras: cada termo dá "pontos"; a soma escolhe o termo da nota.
-    # Finalizações pesam mais (é atacante); perdas de bola contam negativamente.
-    pts_alvo = {"baixo": 0, "medio": 2, "alto": 4}
-    pts_passe = {"baixo": 0, "medio": 1, "alto": 2}
-    pts_perdas = {"baixo": 2, "medio": 1, "alto": 0}
-    saida_por_pontos = {0: "ruim", 1: "ruim", 2: "fraca", 3: "regular",
-                        4: "regular", 5: "boa", 6: "boa", 7: "otima", 8: "otima"}
-
-    regras = []
-    for ta in TERMOS:
-        for tp in TERMOS:
-            for tl in TERMOS:
-                total = pts_alvo[ta] + pts_passe[tp] + pts_perdas[tl]
-                regras.append(ctrl.Rule(alvo[ta] & passe[tp] & perdas[tl],
-                                        nota[saida_por_pontos[total]]))
+    regras = [ctrl.Rule(alvo[ta] & passe[tp] & perdas[tl], nota[saida])
+              for ta, tp, tl, saida in regras_avaliacao()]
     return ctrl.ControlSystem(regras), (alvo, passe, perdas, nota)
 
 
@@ -70,6 +69,10 @@ def _criar_avaliacao():
 # 2. Sistema de DECISÃO (urgência de substituição)
 # ---------------------------------------------------------------------------
 # Tabela de regras lida como: REGRAS[minuto][cansaco][nota] -> urgência
+# Estratégia que a tabela codifica (detalhes no README):
+#   - início: evita trocar; só nota baixa com cansaço relevante justifica.
+#   - meio: é quando a troca mais compensa; nota baixa ou cansaço alto pesam.
+#   - final: restam poucos minutos, então a urgência cai um nível.
 REGRAS_DECISAO = {
     #            nota:  baixa     media     alta
     "inicio": {"baixo": ("baixa", "baixa", "baixa"),
@@ -78,9 +81,10 @@ REGRAS_DECISAO = {
     "meio":   {"baixo": ("media", "baixa", "baixa"),
                "medio": ("alta",  "media", "baixa"),
                "alto":  ("alta",  "alta",  "media")},
-    "final":  {"baixo": ("media", "baixa", "baixa"),
-               "medio": ("alta",  "media", "baixa"),
-               "alto":  ("alta",  "alta",  "media")},
+    # No final, o reserva teria poucos minutos para render: trocar compensa menos.
+    "final":  {"baixo": ("baixa", "baixa", "baixa"),
+               "medio": ("media", "baixa", "baixa"),
+               "alto":  ("alta",  "media", "baixa")},
 }
 
 
